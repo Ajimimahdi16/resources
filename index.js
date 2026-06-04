@@ -1,45 +1,43 @@
-import express from "express";
-import morgan from "morgan";
-import cors from 'cors';
-import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
-import chalk from 'chalk';
-import { errorHandler } from "./src/lib/utilies.js";
-import resourceRouter from "./src/routes/resource.js";
-dotenv.config();
-const PORT = process.env.PORT || 3333;
-
-const app = express();
-
-app.use(
-    morgan('dev', {
-        skip: (req) => req.method === 'OPTIONS',
-    })
-);
-app.use(express.json({ limit: 'Infinity' }));
-
-app.use(cors({
-    origin: "*",
-    credentials: true
-}));
-
-app.use(resourceRouter)
-app.use(errorHandler);
-
-// Log risorse disponibili dal database all'avvio del server
-const databaseDir = path.join(process.cwd(), 'database');
-fs.readdir(databaseDir, (err, files) => {
-    if (err) {
-        console.error(chalk.red('Errore nella lettura della cartella database:'), err);
-    } else {
-        const resources = files
-            .filter(file => file.endsWith('.json'))
-            .map(file => path.basename(file, '.json'));
-        console.log(chalk.green('Risorse disponibili:'), chalk.cyan(resources.join(', ')));
+async function fetchJson(url) {
+    try {
+        const res = await fetch(url);
+        return await res.json();
+    } catch (err) {
+        throw new Error(`Impossibile connettersi all'API. Il server potrebbe essere offline. Dettaglio: ${err.message}`);
     }
-});
+}
 
-app.listen(PORT, () => {
-    console.log(chalk.yellow(`Server avviato sulla porta ${PORT}`));
-});
+async function getDashboardData(query) {
+    // Facciamo partire le chiamate contemporaneamente
+    // Ora queste variabili contengono delle vere Promesse (oggetti in attesa).
+    const destinationsPromise = fetchJson(`https://freetestapi.com/api/v1/destinations?search=${query}`);
+    const weathersPromise = fetchJson(`https://freetestapi.com/api/v1/weathers?search=${query}`);
+    const airportsPromise = fetchJson(`https://freetestapi.com/api/v1/airports?search=${query}`);
+
+    // Creiamo l'array di Promesse
+    const promises = [destinationsPromise, weathersPromise, airportsPromise];
+
+    //  Usiamo  Promise.all. 
+    const [destinations, weathers, airports] = await Promise.all(promises);
+
+    //  Estraiamo il primo elemento di ciascun array
+    return {
+        city: destinations[0].name,
+        country: destinations[0].country,
+        temperature: weathers[0].temperature,
+        weather: weathers[0].weather_description,
+        airport: airports[0].name 
+    };
+}
+
+// --- Esecuzione del test ---
+getDashboardData('london')
+    .then(data => {
+        console.log('Dashboard data:', data);
+        console.log(
+            `${data.city} is in ${data.country}.\n` +
+            `Today there are ${data.temperature} degrees and the weather is ${data.weather}.\n`+
+            `The main airport is ${data.airport}.\n`
+        );
+    })
+    .catch(error => console.error(error));
